@@ -1,6 +1,7 @@
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
+#include <linux/cdev.h>
 
 #define DEVICE_NAME "char_device"
 #define BUFFER_SIZE 1024
@@ -8,6 +9,8 @@
 static int major_number;
 static char device_buffer[BUFFER_SIZE];
 static int open_count = 0;
+static dev_t dev_number;
+static struct cdev char_cdev;
 
 // Open function
 static int device_open(struct inode *inode, struct file *file) {
@@ -66,19 +69,37 @@ static struct file_operations fops = {
 
 // Module initialization
 static int __init char_device_init(void) {
-    major_number = register_chrdev(0, DEVICE_NAME, &fops);
-    if (major_number < 0) {
-        printk(KERN_ALERT "Failed to register a major number\n");
-        return major_number;
+    int ret;
+
+    // Allocate a device number
+    ret = alloc_chrdev_region(&dev_number, 0, 1, DEVICE_NAME);
+    if (ret < 0) {
+        printk(KERN_ALERT "Failed to allocate a major number\n");
+        return ret;
     }
 
-    printk(KERN_INFO "Registered char device with major number %d\n", major_number);
+    // Initialize the cdev structure and add it to the kernel
+    cdev_init(&char_cdev, &fops);
+    char_cdev.owner = THIS_MODULE;
+    ret = cdev_add(&char_cdev, dev_number, 1);
+    if (ret < 0) {
+        unregister_chrdev_region(dev_number, 1);
+        printk(KERN_ALERT "Failed to add cdev\n");
+        return ret;
+    }
+
+    printk(KERN_INFO "Char device registered with major number %d and minor number %d\n", MAJOR(dev_number), MINOR(dev_number));
     return 0;
 }
 
 // Module cleanup
 static void __exit char_device_exit(void) {
-    unregister_chrdev(major_number, DEVICE_NAME);
+    // Remove the cdev from the kernel
+    cdev_del(&char_cdev);
+
+    // Unregister the device number
+    unregister_chrdev_region(dev_number, 1);
+
     printk(KERN_INFO "Char device unregistered\n");
 }
 
